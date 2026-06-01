@@ -16,6 +16,7 @@ namespace FivePhaseMotorTwin
 
         private ComboBox _topologyCombo;
         private ComboBox _faultCombo;
+        private CheckBox _autoToleranceCheck;
         private Button _startButton;
         private Button _pauseButton;
         private Button _resetButton;
@@ -85,12 +86,14 @@ namespace FivePhaseMotorTwin
 
         private void OnFaultClicked(object sender, EventArgs e)
         {
+            _engine.SetAutoToleranceEnabled(IsAutoToleranceEnabled());
             _engine.SelectFault(GetSelectedFault());
             bool ok = _engine.InjectFaultNow();
             if (ok)
             {
                 Log("故障注入完成：" + _engine.Scenario.FaultText + "。");
                 Log("数字孪生残差异常：实测电流与基准电流偏差突增。");
+                if (_engine.AutoToleranceEnabled) Log("诊断完成后将自动投入容错控制。");
                 if (!_timer.Enabled) _timer.Start();
             }
             else
@@ -101,6 +104,7 @@ namespace FivePhaseMotorTwin
 
         private void OnToleranceClicked(object sender, EventArgs e)
         {
+            _engine.SetAutoToleranceEnabled(IsAutoToleranceEnabled());
             _engine.SelectFault(GetSelectedFault());
             bool ok = _engine.ActivateToleranceNow();
             if (ok)
@@ -116,6 +120,8 @@ namespace FivePhaseMotorTwin
 
         private void OnAutoClicked(object sender, EventArgs e)
         {
+            _engine.SetAutoToleranceEnabled(true);
+            if (_autoToleranceCheck != null) _autoToleranceCheck.Checked = true;
             _engine.SelectFault(GetSelectedFault());
             _engine.StartAutoDemo();
             _history.Clear();
@@ -168,7 +174,7 @@ namespace FivePhaseMotorTwin
                         SignalSnapshot s = frame.Sample;
                         writer.Write(s.Time.ToString("0.0000"));
                         writer.Write(",");
-                        writer.Write(Csv(GetTopologyText()));
+                        writer.Write(Csv(frame.TopologyText));
                         writer.Write(",");
                         writer.Write(s.Ia.ToString("0.0000"));
                         writer.Write(",");
@@ -220,6 +226,12 @@ namespace FivePhaseMotorTwin
             _engine.SelectFault(GetSelectedFault());
             ResetSimulation(false);
             Log("故障类型切换：" + GetFaultText(GetSelectedFault()) + "。");
+        }
+
+        private void OnAutoToleranceChanged(object sender, EventArgs e)
+        {
+            _engine.SetAutoToleranceEnabled(IsAutoToleranceEnabled());
+            Log(IsAutoToleranceEnabled() ? "诊断后自动投入容错：开启。" : "诊断后自动投入容错：关闭，可使用单独按钮投入容错。");
         }
 
         private void OnTimerTick(object sender, EventArgs e)
@@ -335,6 +347,11 @@ namespace FivePhaseMotorTwin
         private MotorTopology GetSelectedTopology()
         {
             return _topologyCombo != null && _topologyCombo.SelectedIndex == 1 ? MotorTopology.ThreePhase : MotorTopology.FivePhase;
+        }
+
+        private bool IsAutoToleranceEnabled()
+        {
+            return _autoToleranceCheck == null || _autoToleranceCheck.Checked;
         }
 
         private FaultKind GetSelectedFault()

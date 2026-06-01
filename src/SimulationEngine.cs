@@ -12,6 +12,7 @@ namespace FivePhaseMotorTwin
         private bool _toleranceActive;
         private bool _stableAnnounced;
         private bool _autoDemo;
+        private bool _autoToleranceEnabled = true;
         private double _faultTime;
         private double _toleranceTime;
         private double _diagnosisTimeMs;
@@ -34,6 +35,11 @@ namespace FivePhaseMotorTwin
         public FaultKind SelectedFault
         {
             get { return _selectedFault; }
+        }
+
+        public bool AutoToleranceEnabled
+        {
+            get { return _autoToleranceEnabled; }
         }
 
         public double TimeSeconds { get; private set; }
@@ -71,6 +77,17 @@ namespace FivePhaseMotorTwin
             }
         }
 
+        public void SetAutoToleranceEnabled(bool enabled)
+        {
+            _autoToleranceEnabled = enabled;
+            if (_faultInjected && !_toleranceActive)
+            {
+                FaultKind kind = _scenario.HasFault ? _scenario.Fault : _selectedFault;
+                _scenario = ScenarioInfo.FromMode(GetModeForFault(kind, enabled));
+                _selectedFault = kind;
+            }
+        }
+
         public void Reset()
         {
             TimeSeconds = 0.0;
@@ -94,7 +111,7 @@ namespace FivePhaseMotorTwin
 
         public bool InjectFaultNow()
         {
-            _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, false));
+            _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, _autoToleranceEnabled));
             if (_faultInjected) return false;
             BeginFault();
             return true;
@@ -167,10 +184,10 @@ namespace FivePhaseMotorTwin
                     frame.Events.Add("故障注入完成：" + _scenario.FaultText + "。");
                     frame.Events.Add("数字孪生残差异常：实测电流与基准电流偏差突增。");
                 }
-                if (_scenario.HasTolerance && _faultInjected && !_toleranceActive && TimeSeconds >= _faultTime + 0.45)
+                if (_scenario.HasTolerance && _faultInjected && _diagnosed && !_toleranceActive && TimeSeconds >= _faultTime + 0.18)
                 {
                     ActivateTolerance();
-                    frame.Events.Add("容错控制投入：" + _scenario.StrategyText + "。");
+                    frame.Events.Add("诊断结果联动容错控制投入：" + _scenario.StrategyText + "。");
                 }
             }
 
@@ -197,6 +214,7 @@ namespace FivePhaseMotorTwin
             frame.RecoveryTimeMs = _toleranceActive ? _recoveryTimeMs : 0.0;
             frame.FaultTime = FaultMarker;
             frame.ToleranceTime = ToleranceMarker;
+            frame.TopologyText = GetTopologyText();
 
             if (!_faultInjected)
             {
@@ -221,10 +239,10 @@ namespace FivePhaseMotorTwin
             }
             else
             {
-                frame.RunningState = _scenario.HasTolerance ? "故障运行，待容错投入" : "故障运行，未投入容错";
+                frame.RunningState = _scenario.HasTolerance ? "已诊断，自动容错待投入" : "故障运行，未投入容错";
                 frame.FaultType = _scenario.FaultText;
                 frame.DiagnosisResult = "已定位 " + _scenario.FaultText + "，fault_flag = 1";
-                frame.ControlStrategy = _scenario.HasTolerance ? "等待容错控制投入" : _scenario.StrategyText;
+                frame.ControlStrategy = _scenario.HasTolerance ? "诊断联动：" + _scenario.StrategyText : _scenario.StrategyText;
             }
 
             SignalSnapshot s = frame.Sample;

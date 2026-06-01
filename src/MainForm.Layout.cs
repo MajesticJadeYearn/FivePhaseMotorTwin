@@ -66,7 +66,7 @@ namespace FivePhaseMotorTwin
             left.BackColor = AppTheme.AppBack;
             left.Padding = new Padding(0, 0, 8, 0);
 
-            GroupBox control = CreateGroup("运行模式控制", 270, 318);
+            GroupBox control = CreateGroup("运行模式控制", 270, 350);
             control.Controls.Add(CreateCaption("电机对象", 14, 27));
             _topologyCombo = new ComboBox();
             _topologyCombo.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -88,10 +88,20 @@ namespace FivePhaseMotorTwin
             _faultCombo.SelectedIndexChanged += OnFaultTypeChanged;
             control.Controls.Add(Place(_faultCombo, 86, 59, 168, 28));
 
+            _autoToleranceCheck = new CheckBox();
+            _autoToleranceCheck.Text = "诊断后自动投入容错";
+            _autoToleranceCheck.Checked = true;
+            _autoToleranceCheck.Location = new Point(14, 92);
+            _autoToleranceCheck.Size = new Size(220, 22);
+            _autoToleranceCheck.Font = AppTheme.Font(8.8f, FontStyle.Regular);
+            _autoToleranceCheck.ForeColor = AppTheme.Text;
+            _autoToleranceCheck.CheckedChanged += OnAutoToleranceChanged;
+            control.Controls.Add(_autoToleranceCheck);
+
             TableLayoutPanel buttons = new TableLayoutPanel();
             buttons.ColumnCount = 2;
             buttons.RowCount = 4;
-            buttons.Location = new Point(14, 96);
+            buttons.Location = new Point(14, 120);
             buttons.Size = new Size(240, 158);
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -113,7 +123,7 @@ namespace FivePhaseMotorTwin
             buttons.Controls.Add(_exportButton, 0, 3);
             buttons.Controls.Add(_screenshotButton, 1, 3);
             control.Controls.Add(buttons);
-            Label hint = CreateSmallLabel("先选择三相/五相和故障类型，再注入故障或单独投入容错控制。", 14, 264, 240, 40);
+            Label hint = CreateSmallLabel("现场断开 A 相时保持自动容错开启；需要分步讲解时可关闭后手动投入。", 14, 288, 240, 44);
             control.Controls.Add(hint);
             left.Controls.Add(control);
             GroupBox metrics = CreateGroup("关键指标", 270, 168);
