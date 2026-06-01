@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 namespace FivePhaseMotorTwin
@@ -11,14 +12,17 @@ namespace FivePhaseMotorTwin
     {
         private readonly SimulationEngine _engine = new SimulationEngine();
         private readonly Timer _timer = new Timer();
-        private bool _internalModeChange;
+        private readonly List<SimulationFrame> _history = new List<SimulationFrame>();
 
-        private ComboBox _modeCombo;
+        private ComboBox _topologyCombo;
+        private ComboBox _faultCombo;
         private Button _startButton;
         private Button _pauseButton;
         private Button _resetButton;
         private Button _faultButton;
+        private Button _toleranceButton;
         private Button _autoButton;
+        private Button _exportButton;
         private Button _screenshotButton;
         private Label _stateValue;
         private Label _faultValue;
@@ -43,6 +47,7 @@ namespace FivePhaseMotorTwin
             WindowState = FormWindowState.Maximized;
 
             InitializeUi();
+            ConfigureCurrentWaveView();
             _timer.Interval = 20;
             _timer.Tick += OnTimerTick;
             ResetSimulation(false);
@@ -80,8 +85,8 @@ namespace FivePhaseMotorTwin
 
         private void OnFaultClicked(object sender, EventArgs e)
         {
+            _engine.SelectFault(GetSelectedFault());
             bool ok = _engine.InjectFaultNow();
-            SyncComboToEngine();
             if (ok)
             {
                 Log("故障注入完成：" + _engine.Scenario.FaultText + "。");
@@ -94,15 +99,29 @@ namespace FivePhaseMotorTwin
             }
         }
 
+        private void OnToleranceClicked(object sender, EventArgs e)
+        {
+            _engine.SelectFault(GetSelectedFault());
+            bool ok = _engine.ActivateToleranceNow();
+            if (ok)
+            {
+                Log("容错控制投入：" + _engine.Scenario.StrategyText + "。");
+                if (!_timer.Enabled) _timer.Start();
+            }
+            else
+            {
+                Log("容错控制已经投入，保持当前策略运行。");
+            }
+        }
+
         private void OnAutoClicked(object sender, EventArgs e)
         {
-            ScenarioInfo current = ScenarioInfo.All[_modeCombo.SelectedIndex];
-            ScenarioMode target = current.HasFault ? (current.HasTolerance ? current.Mode : ScenarioInfo.WithTolerance(current.Fault)) : ScenarioMode.WindingOpenTolerance;
-            SetScenario(target);
+            _engine.SelectFault(GetSelectedFault());
             _engine.StartAutoDemo();
+            _history.Clear();
             ClearWaveforms();
             _timer.Start();
-            Log("自动运行启动：正常运行 3 s -> 故障注入 2 s -> 容错控制投入 -> 稳定运行。");
+            Log("自动运行启动：" + GetTopologyText() + "，" + _engine.Scenario.FaultText + "，正常运行 3 s -> 故障注入 2 s -> 容错控制投入 -> 稳定运行。");
         }
 
         private void OnScreenshotClicked(object sender, EventArgs e)
@@ -126,18 +145,87 @@ namespace FivePhaseMotorTwin
             }
         }
 
-        private void OnModeChanged(object sender, EventArgs e)
+        private void OnExportClicked(object sender, EventArgs e)
         {
-            if (_internalModeChange || _modeCombo.SelectedIndex < 0) return;
-            ScenarioInfo info = ScenarioInfo.All[_modeCombo.SelectedIndex];
-            _engine.SetScenario(info.Mode);
+            try
+            {
+                if (_history.Count == 0)
+                {
+                    Log("暂无可导出的运行数据。");
+                    return;
+                }
+
+                string root = GetProjectRoot();
+                string folder = Path.Combine(root, "exports");
+                Directory.CreateDirectory(folder);
+                string path = Path.Combine(folder, "waveform_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
+                using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(true)))
+                {
+                    writer.WriteLine("time_s,topology,ia_A,ib_A,ic_A,id_A,ie_A,speed_rpm,torque_Nm,iq_A,residual,fault_flag,running_state,fault_type,diagnosis,control_strategy");
+                    for (int i = 0; i < _history.Count; i++)
+                    {
+                        SimulationFrame frame = _history[i];
+                        SignalSnapshot s = frame.Sample;
+                        writer.Write(s.Time.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(Csv(GetTopologyText()));
+                        writer.Write(",");
+                        writer.Write(s.Ia.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Ib.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Ic.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Id.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Ie.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Speed.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Torque.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Iq.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Residual.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.FaultFlag.ToString("0"));
+                        writer.Write(",");
+                        writer.Write(Csv(frame.RunningState));
+                        writer.Write(",");
+                        writer.Write(Csv(frame.FaultType));
+                        writer.Write(",");
+                        writer.Write(Csv(frame.DiagnosisResult));
+                        writer.Write(",");
+                        writer.WriteLine(Csv(frame.ControlStrategy));
+                    }
+                }
+                Log("已导出运行数据：" + path);
+            }
+            catch (Exception ex)
+            {
+                Log("数据导出失败：" + ex.Message);
+            }
+        }
+
+        private void OnTopologyChanged(object sender, EventArgs e)
+        {
+            _engine.SetTopology(GetSelectedTopology());
+            ConfigureCurrentWaveView();
             ResetSimulation(false);
-            Log("场景切换：" + info.DisplayName + "。");
+            Log("电机对象切换：" + GetTopologyText() + "。");
+        }
+
+        private void OnFaultTypeChanged(object sender, EventArgs e)
+        {
+            _engine.SelectFault(GetSelectedFault());
+            ResetSimulation(false);
+            Log("故障类型切换：" + GetFaultText(GetSelectedFault()) + "。");
         }
 
         private void OnTimerTick(object sender, EventArgs e)
         {
             SimulationFrame frame = _engine.Step(_timer.Interval / 1000.0);
+            RecordFrame(frame);
             AppendWaveforms(frame);
             UpdateStatus(frame);
             for (int i = 0; i < frame.Events.Count; i++) Log(frame.Events[i]);
@@ -148,32 +236,15 @@ namespace FivePhaseMotorTwin
             _timer.Stop();
             _pauseButton.Text = "暂停运行";
             _engine.Reset();
+            _history.Clear();
             ClearWaveforms();
             SimulationFrame frame = _engine.Step(0.0);
+            RecordFrame(frame);
             AppendWaveforms(frame);
             UpdateStatus(frame);
             if (log) Log("系统复位，等待开始运行。");
         }
 
-        private void SetScenario(ScenarioMode mode)
-        {
-            _engine.SetScenario(mode);
-            SyncComboToEngine();
-        }
-
-        private void SyncComboToEngine()
-        {
-            _internalModeChange = true;
-            for (int i = 0; i < ScenarioInfo.All.Length; i++)
-            {
-                if (ScenarioInfo.All[i].Mode == _engine.Scenario.Mode)
-                {
-                    _modeCombo.SelectedIndex = i;
-                    break;
-                }
-            }
-            _internalModeChange = false;
-        }
         private void AppendWaveforms(SimulationFrame frame)
         {
             SignalSnapshot s = frame.Sample;
@@ -201,6 +272,15 @@ namespace FivePhaseMotorTwin
             _faultView.Append(s.Time, fault);
         }
 
+        private void RecordFrame(SimulationFrame frame)
+        {
+            _history.Add(frame);
+            if (_history.Count > 60000)
+            {
+                _history.RemoveRange(0, _history.Count - 60000);
+            }
+        }
+
         private void UpdateStatus(SimulationFrame frame)
         {
             _stateValue.Text = frame.RunningState;
@@ -217,6 +297,19 @@ namespace FivePhaseMotorTwin
             _currentView.ClearData();
             _mechanicalView.ClearData();
             _faultView.ClearData();
+        }
+
+        private void ConfigureCurrentWaveView()
+        {
+            if (_currentView == null) return;
+            if (_engine.Topology == MotorTopology.ThreePhase)
+            {
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic" }, "三相电流波形 ia / ib / ic");
+            }
+            else
+            {
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie" }, "五相电流波形 ia / ib / ic / id / ie");
+            }
         }
 
         private void Log(string message)
@@ -237,6 +330,37 @@ namespace FivePhaseMotorTwin
                 return dir.Parent.FullName;
             }
             return baseDir;
+        }
+
+        private MotorTopology GetSelectedTopology()
+        {
+            return _topologyCombo != null && _topologyCombo.SelectedIndex == 1 ? MotorTopology.ThreePhase : MotorTopology.FivePhase;
+        }
+
+        private FaultKind GetSelectedFault()
+        {
+            if (_faultCombo == null) return FaultKind.WindingOpen;
+            if (_faultCombo.SelectedIndex == 1) return FaultKind.UpperSwitchOpen;
+            if (_faultCombo.SelectedIndex == 2) return FaultKind.LowerSwitchOpen;
+            return FaultKind.WindingOpen;
+        }
+
+        private string GetTopologyText()
+        {
+            return _engine.Topology == MotorTopology.ThreePhase ? "三相小电机" : "五相容错电机";
+        }
+
+        private static string GetFaultText(FaultKind kind)
+        {
+            if (kind == FaultKind.UpperSwitchOpen) return "A 相上功率管开路";
+            if (kind == FaultKind.LowerSwitchOpen) return "A 相下功率管开路";
+            return "A 相绕组开路";
+        }
+
+        private static string Csv(string value)
+        {
+            if (value == null) value = string.Empty;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
     }
 }

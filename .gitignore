@@ -4,6 +4,7 @@ obj/
 .vs/
 
 screenshots/
+exports/
 
 *.user
 *.suo

@@ -11,6 +11,12 @@ namespace FivePhaseMotorTwin
         LowerSwitchOpen
     }
 
+    public enum MotorTopology
+    {
+        ThreePhase = 3,
+        FivePhase = 5
+    }
+
     public enum ScenarioMode
     {
         Normal,

@@ -6,6 +6,7 @@ namespace FivePhaseMotorTwin
     {
         private readonly Random _random = new Random(20260427);
         private ScenarioInfo _scenario;
+        private FaultKind _selectedFault = FaultKind.WindingOpen;
         private bool _faultInjected;
         private bool _diagnosed;
         private bool _toleranceActive;
@@ -18,6 +19,7 @@ namespace FivePhaseMotorTwin
 
         public SimulationEngine()
         {
+            Topology = MotorTopology.FivePhase;
             _scenario = ScenarioInfo.FromMode(ScenarioMode.Normal);
             Reset();
         }
@@ -25,6 +27,13 @@ namespace FivePhaseMotorTwin
         public ScenarioInfo Scenario
         {
             get { return _scenario; }
+        }
+
+        public MotorTopology Topology { get; private set; }
+
+        public FaultKind SelectedFault
+        {
+            get { return _selectedFault; }
         }
 
         public double TimeSeconds { get; private set; }
@@ -42,7 +51,24 @@ namespace FivePhaseMotorTwin
         public void SetScenario(ScenarioMode mode)
         {
             _scenario = ScenarioInfo.FromMode(mode);
+            if (_scenario.HasFault) _selectedFault = _scenario.Fault;
             Reset();
+        }
+
+        public void SetTopology(MotorTopology topology)
+        {
+            Topology = topology;
+            Reset();
+        }
+
+        public void SelectFault(FaultKind kind)
+        {
+            if (kind == FaultKind.None) kind = FaultKind.WindingOpen;
+            _selectedFault = kind;
+            if (!_faultInjected)
+            {
+                _scenario = ScenarioInfo.FromMode(ScenarioMode.Normal);
+            }
         }
 
         public void Reset()
@@ -61,18 +87,37 @@ namespace FivePhaseMotorTwin
 
         public void StartAutoDemo()
         {
+            _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, true));
             Reset();
             _autoDemo = true;
         }
 
         public bool InjectFaultNow()
         {
-            if (!_scenario.HasFault)
-            {
-                _scenario = ScenarioInfo.FromMode(ScenarioMode.WindingOpenTolerance);
-            }
+            _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, false));
             if (_faultInjected) return false;
             BeginFault();
+            return true;
+        }
+
+        public bool ActivateToleranceNow()
+        {
+            if (!_faultInjected)
+            {
+                _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, true));
+                BeginFault();
+                _diagnosed = true;
+            }
+            else if (!_scenario.HasTolerance)
+            {
+                FaultKind kind = _scenario.HasFault ? _scenario.Fault : _selectedFault;
+                _scenario = ScenarioInfo.FromMode(GetModeForFault(kind, true));
+                _selectedFault = kind;
+            }
+
+            if (_toleranceActive) return false;
+            if (!_diagnosed) _diagnosed = true;
+            ActivateTolerance();
             return true;
         }
 
@@ -155,10 +200,10 @@ namespace FivePhaseMotorTwin
 
             if (!_faultInjected)
             {
-                frame.RunningState = _autoDemo ? "自动运行：健康运行阶段" : "健康运行";
+                frame.RunningState = _autoDemo ? "自动运行：" + GetTopologyText() + "健康阶段" : GetTopologyText() + "健康运行";
                 frame.FaultType = "无故障";
                 frame.DiagnosisResult = "数字孪生残差正常，fault_flag = 0";
-                frame.ControlStrategy = "健康五相矢量控制 / 五相 SVPWM";
+                frame.ControlStrategy = GetHealthyStrategy();
             }
             else if (!_diagnosed)
             {
@@ -191,15 +236,16 @@ namespace FivePhaseMotorTwin
         }
         private SignalSnapshot GenerateSignals(double t)
         {
+            int phaseCount = Topology == MotorTopology.ThreePhase ? 3 : 5;
+            double phaseStep = Topology == MotorTopology.ThreePhase ? 120.0 : 72.0;
             double w = 2.0 * Math.PI * 4.5;
             double amp = 12.0;
-            double[] phase = new double[] { 0.0, -72.0, -144.0, -216.0, -288.0 };
             double[] reference = new double[5];
             double[] actual = new double[5];
 
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < phaseCount; i++)
             {
-                reference[i] = amp * Math.Sin(w * t + phase[i] * Math.PI / 180.0);
+                reference[i] = amp * Math.Sin(w * t - phaseStep * i * Math.PI / 180.0);
                 actual[i] = reference[i] + 0.12 * Math.Sin(2.0 * Math.PI * 0.9 * t + i);
             }
 
@@ -221,7 +267,7 @@ namespace FivePhaseMotorTwin
                 if (_scenario.Fault == FaultKind.WindingOpen)
                 {
                     actual[0] = 0.08 * Math.Sin(8.0 * w * t);
-                    for (int i = 1; i < 5; i++)
+                    for (int i = 1; i < phaseCount; i++)
                     {
                         double compGain = _toleranceActive ? (1.16 - 0.08 * transient) : 1.06;
                         double distort = _toleranceActive ? (0.045 + 0.20 * transient) : 0.26;
@@ -238,7 +284,7 @@ namespace FivePhaseMotorTwin
                     {
                         actual[0] = reference[0] * (_toleranceActive ? 0.96 : 1.00);
                     }
-                    ApplyBridgeCompensation(actual, reference, amp, t, _toleranceActive, transient, true);
+                    ApplyBridgeCompensation(actual, reference, amp, t, _toleranceActive, transient, true, phaseCount);
                 }
                 else if (_scenario.Fault == FaultKind.LowerSwitchOpen)
                 {
@@ -250,7 +296,7 @@ namespace FivePhaseMotorTwin
                     {
                         actual[0] = reference[0] * (_toleranceActive ? 0.96 : 1.00);
                     }
-                    ApplyBridgeCompensation(actual, reference, amp, t, _toleranceActive, transient, false);
+                    ApplyBridgeCompensation(actual, reference, amp, t, _toleranceActive, transient, false, phaseCount);
                 }
 
                 if (_toleranceActive)
@@ -285,16 +331,34 @@ namespace FivePhaseMotorTwin
             return s;
         }
 
-        private static void ApplyBridgeCompensation(double[] actual, double[] reference, double amp, double t, bool tolerance, double transient, bool upper)
+        private static void ApplyBridgeCompensation(double[] actual, double[] reference, double amp, double t, bool tolerance, double transient, bool upper, int phaseCount)
         {
             double w = 2.0 * Math.PI * 4.5;
             double sign = upper ? 1.0 : -1.0;
-            for (int i = 1; i < 5; i++)
+            for (int i = 1; i < phaseCount; i++)
             {
                 double comp = tolerance ? (0.10 + 0.20 * transient) : 0.24;
                 double selective = Math.Max(0.0, sign * Math.Sin(w * t));
                 actual[i] = reference[i] + amp * comp * selective * Math.Sin(w * t + i * 0.9);
             }
+        }
+
+        private static ScenarioMode GetModeForFault(FaultKind kind, bool tolerance)
+        {
+            if (kind == FaultKind.UpperSwitchOpen) return tolerance ? ScenarioMode.UpperSwitchOpenTolerance : ScenarioMode.UpperSwitchOpen;
+            if (kind == FaultKind.LowerSwitchOpen) return tolerance ? ScenarioMode.LowerSwitchOpenTolerance : ScenarioMode.LowerSwitchOpen;
+            return tolerance ? ScenarioMode.WindingOpenTolerance : ScenarioMode.WindingOpen;
+        }
+
+        private string GetTopologyText()
+        {
+            return Topology == MotorTopology.ThreePhase ? "三相小电机" : "五相容错电机";
+        }
+
+        private string GetHealthyStrategy()
+        {
+            if (Topology == MotorTopology.ThreePhase) return "健康三相矢量控制 / 三相 SVPWM";
+            return "健康五相矢量控制 / 五相 SVPWM";
         }
     }
 }
