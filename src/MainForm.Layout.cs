@@ -126,6 +126,42 @@ namespace FivePhaseMotorTwin
             Label hint = CreateSmallLabel("现场断开 A 相时保持自动容错开启；需要分步讲解时可关闭后手动投入。", 14, 288, 240, 44);
             control.Controls.Add(hint);
             left.Controls.Add(control);
+
+            GroupBox source = CreateGroup("实时数据源", 270, 142);
+            source.Controls.Add(CreateCaption("串口", 14, 28));
+            _serialPortCombo = new ComboBox();
+            _serialPortCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            _serialPortCombo.Font = AppTheme.Font(8.8f, FontStyle.Regular);
+            source.Controls.Add(Place(_serialPortCombo, 58, 25, 78, 26));
+
+            _baudCombo = new ComboBox();
+            _baudCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            _baudCombo.Font = AppTheme.Font(8.8f, FontStyle.Regular);
+            _baudCombo.Items.Add("115200");
+            _baudCombo.Items.Add("921600");
+            _baudCombo.Items.Add("57600");
+            _baudCombo.Items.Add("38400");
+            _baudCombo.Items.Add("9600");
+            _baudCombo.SelectedIndex = 0;
+            source.Controls.Add(Place(_baudCombo, 144, 25, 110, 26));
+
+            _refreshPortsButton = CreateButton("刷新", OnRefreshPortsClicked);
+            _connectSerialButton = CreateButton("连接串口", OnSerialConnectClicked);
+            TableLayoutPanel sourceButtons = new TableLayoutPanel();
+            sourceButtons.ColumnCount = 2;
+            sourceButtons.RowCount = 1;
+            sourceButtons.Location = new Point(14, 58);
+            sourceButtons.Size = new Size(240, 36);
+            sourceButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+            sourceButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+            sourceButtons.Controls.Add(_refreshPortsButton, 0, 0);
+            sourceButtons.Controls.Add(_connectSerialButton, 1, 0);
+            source.Controls.Add(sourceButtons);
+
+            _serialStatusValue = CreateSmallLabel("仿真数据模式", 14, 102, 240, 28);
+            source.Controls.Add(_serialStatusValue);
+            left.Controls.Add(source);
+
             GroupBox metrics = CreateGroup("关键指标", 270, 168);
             metrics.Controls.Add(CreateCaption("系统状态", 14, 26));
             _stateValue = CreateValue("健康运行", 92, 26, 162, 18);

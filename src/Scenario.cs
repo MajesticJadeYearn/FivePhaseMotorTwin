@@ -99,6 +99,7 @@ namespace FivePhaseMotorTwin
     public sealed class SimulationFrame
     {
         public SignalSnapshot Sample;
+        public string SourceText;
         public string TopologyText;
         public string RunningState;
         public string FaultType;

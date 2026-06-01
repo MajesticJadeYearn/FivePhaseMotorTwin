@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.IO.Ports;
 using System.Text;
 using System.Windows.Forms;
 
@@ -13,10 +14,19 @@ namespace FivePhaseMotorTwin
         private readonly SimulationEngine _engine = new SimulationEngine();
         private readonly Timer _timer = new Timer();
         private readonly List<SimulationFrame> _history = new List<SimulationFrame>();
+        private readonly object _serialLock = new object();
+        private readonly Queue<SignalSnapshot> _serialSamples = new Queue<SignalSnapshot>();
+        private readonly StringBuilder _serialBuffer = new StringBuilder();
+        private SerialPort _serialPort;
 
         private ComboBox _topologyCombo;
         private ComboBox _faultCombo;
+        private ComboBox _serialPortCombo;
+        private ComboBox _baudCombo;
         private CheckBox _autoToleranceCheck;
+        private Button _refreshPortsButton;
+        private Button _connectSerialButton;
+        private Label _serialStatusValue;
         private Button _startButton;
         private Button _pauseButton;
         private Button _resetButton;
@@ -49,8 +59,10 @@ namespace FivePhaseMotorTwin
 
             InitializeUi();
             ConfigureCurrentWaveView();
+            RefreshSerialPorts();
             _timer.Interval = 20;
             _timer.Tick += OnTimerTick;
+            FormClosing += OnMainFormClosing;
             ResetSimulation(false);
         }
 
@@ -167,12 +179,14 @@ namespace FivePhaseMotorTwin
                 string path = Path.Combine(folder, "waveform_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
                 using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(true)))
                 {
-                    writer.WriteLine("time_s,topology,ia_A,ib_A,ic_A,id_A,ie_A,speed_rpm,torque_Nm,iq_A,residual,fault_flag,running_state,fault_type,diagnosis,control_strategy");
+                    writer.WriteLine("time_s,source,topology,ia_A,ib_A,ic_A,id_A,ie_A,speed_rpm,torque_Nm,iq_A,residual,fault_flag,running_state,fault_type,diagnosis,control_strategy");
                     for (int i = 0; i < _history.Count; i++)
                     {
                         SimulationFrame frame = _history[i];
                         SignalSnapshot s = frame.Sample;
                         writer.Write(s.Time.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(Csv(frame.SourceText));
                         writer.Write(",");
                         writer.Write(Csv(frame.TopologyText));
                         writer.Write(",");
@@ -218,6 +232,7 @@ namespace FivePhaseMotorTwin
             _engine.SetTopology(GetSelectedTopology());
             ConfigureCurrentWaveView();
             ResetSimulation(false);
+            if (IsSerialConnected()) _timer.Start();
             Log("电机对象切换：" + GetTopologyText() + "。");
         }
 
@@ -225,6 +240,7 @@ namespace FivePhaseMotorTwin
         {
             _engine.SelectFault(GetSelectedFault());
             ResetSimulation(false);
+            if (IsSerialConnected()) _timer.Start();
             Log("故障类型切换：" + GetFaultText(GetSelectedFault()) + "。");
         }
 
@@ -234,13 +250,163 @@ namespace FivePhaseMotorTwin
             Log(IsAutoToleranceEnabled() ? "诊断后自动投入容错：开启。" : "诊断后自动投入容错：关闭，可使用单独按钮投入容错。");
         }
 
+        private void OnRefreshPortsClicked(object sender, EventArgs e)
+        {
+            RefreshSerialPorts();
+            Log("串口列表已刷新。");
+        }
+
+        private void OnSerialConnectClicked(object sender, EventArgs e)
+        {
+            if (IsSerialConnected())
+            {
+                CloseSerialPort();
+                Log("实时串口数据源已断开，回到仿真数据模式。");
+                return;
+            }
+
+            if (_serialPortCombo == null || _serialPortCombo.SelectedItem == null)
+            {
+                Log("没有可连接的串口，请先刷新串口列表。");
+                return;
+            }
+
+            try
+            {
+                ResetSimulation(false);
+                ClearSerialQueue();
+                int baud = 115200;
+                int.TryParse(_baudCombo.Text, out baud);
+                _serialPort = new SerialPort(_serialPortCombo.SelectedItem.ToString(), baud);
+                _serialPort.NewLine = "\n";
+                _serialPort.Encoding = Encoding.ASCII;
+                _serialPort.ReadTimeout = 50;
+                _serialPort.DataReceived += OnSerialDataReceived;
+                _serialPort.Open();
+                _connectSerialButton.Text = "断开串口";
+                SetSerialStatus("已连接 " + _serialPort.PortName + " @ " + baud.ToString());
+                _timer.Start();
+                Log("实时串口数据源已连接：" + _serialPort.PortName + "，等待控制器数据。");
+            }
+            catch (Exception ex)
+            {
+                CloseSerialPort();
+                Log("串口连接失败：" + ex.Message);
+            }
+        }
+
+        private void OnMainFormClosing(object sender, FormClosingEventArgs e)
+        {
+            CloseSerialPort();
+        }
+
         private void OnTimerTick(object sender, EventArgs e)
         {
+            if (IsSerialConnected())
+            {
+                ProcessSerialSamples();
+                return;
+            }
+
             SimulationFrame frame = _engine.Step(_timer.Interval / 1000.0);
             RecordFrame(frame);
             AppendWaveforms(frame);
             UpdateStatus(frame);
             for (int i = 0; i < frame.Events.Count; i++) Log(frame.Events[i]);
+        }
+
+        private void ProcessSerialSamples()
+        {
+            int processed = 0;
+            SignalSnapshot sample;
+            while (processed < 40 && TryDequeueSerialSample(out sample))
+            {
+                SimulationFrame frame = _engine.StepExternal(sample, _timer.Interval / 1000.0);
+                RecordFrame(frame);
+                AppendWaveforms(frame);
+                UpdateStatus(frame);
+                for (int i = 0; i < frame.Events.Count; i++) Log(frame.Events[i]);
+                processed++;
+            }
+
+            if (processed > 0)
+            {
+                SetSerialStatus("接收中 " + _serialPort.PortName + "，缓存 " + GetSerialQueueCount().ToString());
+            }
+        }
+
+        private void OnSerialDataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            try
+            {
+                string chunk = _serialPort.ReadExisting();
+                if (string.IsNullOrEmpty(chunk)) return;
+                lock (_serialLock)
+                {
+                    _serialBuffer.Append(chunk);
+                    ExtractSerialLinesLocked();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void ExtractSerialLinesLocked()
+        {
+            while (true)
+            {
+                string buffer = _serialBuffer.ToString();
+                int indexN = buffer.IndexOf('\n');
+                int indexR = buffer.IndexOf('\r');
+                int index;
+                if (indexN < 0) index = indexR;
+                else if (indexR < 0) index = indexN;
+                else index = Math.Min(indexN, indexR);
+                if (index < 0) break;
+
+                string line = buffer.Substring(0, index).Trim();
+                _serialBuffer.Remove(0, index + 1);
+                if (line.Length == 0) continue;
+
+                SignalSnapshot sample;
+                if (SerialTelemetryParser.TryParse(line, out sample))
+                {
+                    _serialSamples.Enqueue(sample);
+                    while (_serialSamples.Count > 5000) _serialSamples.Dequeue();
+                }
+            }
+        }
+
+        private bool TryDequeueSerialSample(out SignalSnapshot sample)
+        {
+            lock (_serialLock)
+            {
+                if (_serialSamples.Count > 0)
+                {
+                    sample = _serialSamples.Dequeue();
+                    return true;
+                }
+            }
+            sample = null;
+            return false;
+        }
+
+        private int GetSerialQueueCount()
+        {
+            lock (_serialLock)
+            {
+                return _serialSamples.Count;
+            }
+        }
+
+        private void ClearSerialQueue()
+        {
+            lock (_serialLock)
+            {
+                _serialSamples.Clear();
+                _serialBuffer.Length = 0;
+            }
         }
 
         private void ResetSimulation(bool log)
@@ -342,6 +508,55 @@ namespace FivePhaseMotorTwin
                 return dir.Parent.FullName;
             }
             return baseDir;
+        }
+
+        private void RefreshSerialPorts()
+        {
+            if (_serialPortCombo == null) return;
+            string selected = _serialPortCombo.SelectedItem == null ? null : _serialPortCombo.SelectedItem.ToString();
+            _serialPortCombo.Items.Clear();
+            string[] ports = SerialPort.GetPortNames();
+            Array.Sort(ports);
+            for (int i = 0; i < ports.Length; i++) _serialPortCombo.Items.Add(ports[i]);
+            if (!string.IsNullOrEmpty(selected) && _serialPortCombo.Items.Contains(selected))
+            {
+                _serialPortCombo.SelectedItem = selected;
+            }
+            else if (_serialPortCombo.Items.Count > 0)
+            {
+                _serialPortCombo.SelectedIndex = 0;
+            }
+            SetSerialStatus(_serialPortCombo.Items.Count > 0 ? "可连接串口：" + _serialPortCombo.Items.Count.ToString() : "未发现串口");
+        }
+
+        private bool IsSerialConnected()
+        {
+            return _serialPort != null && _serialPort.IsOpen;
+        }
+
+        private void CloseSerialPort()
+        {
+            try
+            {
+                if (_serialPort != null)
+                {
+                    _serialPort.DataReceived -= OnSerialDataReceived;
+                    if (_serialPort.IsOpen) _serialPort.Close();
+                    _serialPort.Dispose();
+                }
+            }
+            catch
+            {
+            }
+            _serialPort = null;
+            ClearSerialQueue();
+            if (_connectSerialButton != null) _connectSerialButton.Text = "连接串口";
+            SetSerialStatus("仿真数据模式");
+        }
+
+        private void SetSerialStatus(string text)
+        {
+            if (_serialStatusValue != null) _serialStatusValue.Text = text;
         }
 
         private MotorTopology GetSelectedTopology()

@@ -63,6 +63,7 @@ E:\26730\Codex\FivePhaseMotorTwin\FivePhaseMotorTwin.sln
 - 支持场景：正常运行、A 相绕组开路、A 相上功率管开路、A 相下功率管开路，以及三类故障的容错控制模式。
 - 支持按钮：开始运行、暂停运行、系统复位、注入故障、投入容错、自动运行、导出数据 CSV、导出运行截图。
 - 支持 `诊断后自动投入容错` 开关：现场断开 A 相演示时默认开启，故障诊断完成后自动切换到容错波形；需要分步讲解时可关闭，再手动点击 `投入容错`。
+- 支持可选串口实时数据源：连接控制器后，接收 `ia,ib,ic`、`ia,ib,ic,speed,torque,iq`、`ia,ib,ic,id,ie,speed,torque,iq,residual,fault_flag` 等 CSV 行，也兼容 `ia=...,ib=...` 键值行；未连接串口时保持仿真数据模式。
 - 波形窗口支持鼠标拖动左右查看历史波形、滚轮缩放时间轴、悬停查看时间与幅值点位信息，双击返回实时跟随。
 - 数据导出保存到 `exports` 目录，截图保存到 `screenshots` 目录。
 - 自动运行模式：正常运行 3 秒 -> 注入故障并展示 2 秒 -> 投入容错控制 -> 稳定运行。
@@ -78,6 +79,7 @@ src\Program.cs               程序入口
 src\MainForm*.cs             主界面布局和交互逻辑
 src\SimulationEngine.cs      五相电机、故障、容错控制波形运行逻辑
 src\WaveformView.cs          实时波形自绘控件
+src\SerialTelemetryParser.cs 串口实时数据行解析
 src\TwinFlowPanel.cs         数字孪生流程状态显示控件
 src\Scenario.cs              模式、故障类型、运行数据结构
 demo_script.md               演示视频讲解词

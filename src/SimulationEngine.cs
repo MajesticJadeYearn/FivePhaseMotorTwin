@@ -13,6 +13,7 @@ namespace FivePhaseMotorTwin
         private bool _stableAnnounced;
         private bool _autoDemo;
         private bool _autoToleranceEnabled = true;
+        private int _externalFaultScore;
         private double _faultTime;
         private double _toleranceTime;
         private double _diagnosisTimeMs;
@@ -100,6 +101,7 @@ namespace FivePhaseMotorTwin
             _toleranceTime = double.NaN;
             _diagnosisTimeMs = 0.04;
             _recoveryTimeMs = 49.0;
+            _externalFaultScore = 0;
         }
 
         public void StartAutoDemo()
@@ -136,6 +138,60 @@ namespace FivePhaseMotorTwin
             if (!_diagnosed) _diagnosed = true;
             ActivateTolerance();
             return true;
+        }
+
+        public SimulationFrame StepExternal(SignalSnapshot input, double dt)
+        {
+            if (input == null) return Step(dt);
+
+            if (!double.IsNaN(input.Time) && input.Time >= 0.0 && input.Time >= TimeSeconds)
+            {
+                TimeSeconds = input.Time;
+            }
+            else
+            {
+                TimeSeconds += dt;
+            }
+
+            SimulationFrame frame = new SimulationFrame();
+            SignalSnapshot sample = NormalizeExternalSample(input);
+            double inferredResidual = CalculateExternalResidual(sample);
+            if (sample.Residual > 0.0) inferredResidual = Math.Max(inferredResidual, sample.Residual);
+            sample.Residual = Math.Max(0.0, Math.Min(1.18, inferredResidual));
+
+            bool externalFlag = sample.FaultFlag > 0.5 || sample.Residual > 0.55;
+            bool aPhaseOpen = IsAPhaseLikelyOpen(sample);
+            if (externalFlag || aPhaseOpen)
+            {
+                _externalFaultScore++;
+            }
+            else if (_externalFaultScore > 0)
+            {
+                _externalFaultScore--;
+            }
+
+            if (!_faultInjected && (externalFlag || _externalFaultScore >= 5))
+            {
+                _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, _autoToleranceEnabled));
+                BeginFault();
+                frame.Events.Add("实时数据检测到 A 相异常：" + _scenario.FaultText + "。");
+                frame.Events.Add("数字孪生残差异常：实测电流与基准电流偏差突增。");
+                if (_autoToleranceEnabled) frame.Events.Add("诊断完成后将自动投入容错控制。");
+            }
+
+            if (_scenario.HasTolerance && _faultInjected && _diagnosed && !_toleranceActive && TimeSeconds >= _faultTime + 0.18)
+            {
+                ActivateTolerance();
+                frame.Events.Add("诊断结果联动容错控制投入：" + _scenario.StrategyText + "。");
+            }
+
+            UpdateDiagnosisAndRecovery(frame);
+            if (_diagnosed) sample.FaultFlag = 1.0;
+
+            frame.Sample = sample;
+            frame.SourceText = "串口实时数据";
+            FillFrameStatus(frame);
+            return frame;
         }
 
         private void BeginFault()
@@ -191,6 +247,15 @@ namespace FivePhaseMotorTwin
                 }
             }
 
+            UpdateDiagnosisAndRecovery(frame);
+
+            frame.Sample = GenerateSignals(TimeSeconds);
+            FillFrameStatus(frame);
+            return frame;
+        }
+
+        private void UpdateDiagnosisAndRecovery(SimulationFrame frame)
+        {
             if (_faultInjected && !_diagnosed && TimeSeconds >= _faultTime + _diagnosisTimeMs / 1000.0)
             {
                 _diagnosed = true;
@@ -202,10 +267,6 @@ namespace FivePhaseMotorTwin
                 _stableAnnounced = true;
                 frame.Events.Add("系统恢复稳定运行：容错恢复时间 " + _recoveryTimeMs.ToString("0.0") + " ms。");
             }
-
-            frame.Sample = GenerateSignals(TimeSeconds);
-            FillFrameStatus(frame);
-            return frame;
         }
 
         private void FillFrameStatus(SimulationFrame frame)
@@ -214,6 +275,7 @@ namespace FivePhaseMotorTwin
             frame.RecoveryTimeMs = _toleranceActive ? _recoveryTimeMs : 0.0;
             frame.FaultTime = FaultMarker;
             frame.ToleranceTime = ToleranceMarker;
+            if (string.IsNullOrEmpty(frame.SourceText)) frame.SourceText = "仿真数据";
             frame.TopologyText = GetTopologyText();
 
             if (!_faultInjected)
@@ -252,6 +314,56 @@ namespace FivePhaseMotorTwin
             frame.TwinFaultText = "故障类型识别  " + frame.FaultType;
             frame.TwinStrategyText = "容错策略匹配  " + frame.ControlStrategy;
         }
+
+        private SignalSnapshot NormalizeExternalSample(SignalSnapshot input)
+        {
+            SignalSnapshot sample = new SignalSnapshot();
+            sample.Time = TimeSeconds;
+            sample.Ia = input.Ia;
+            sample.Ib = input.Ib;
+            sample.Ic = input.Ic;
+            sample.Id = input.Id;
+            sample.Ie = input.Ie;
+            sample.IaRef = Math.Abs(input.IaRef) > 0.0001 ? input.IaRef : input.Ia;
+            sample.Speed = input.Speed;
+            sample.Torque = input.Torque;
+            sample.Iq = input.Iq;
+            sample.Residual = input.Residual;
+            sample.FaultFlag = input.FaultFlag;
+            return sample;
+        }
+
+        private double CalculateExternalResidual(SignalSnapshot sample)
+        {
+            double otherSum = Math.Abs(sample.Ib) + Math.Abs(sample.Ic);
+            int count = 2;
+            if (Topology == MotorTopology.FivePhase)
+            {
+                otherSum += Math.Abs(sample.Id) + Math.Abs(sample.Ie);
+                count = 4;
+            }
+
+            double otherMean = otherSum / count;
+            if (otherMean < 0.2) return Math.Max(0.02, sample.Residual);
+
+            double drop = Math.Max(0.0, (otherMean - Math.Abs(sample.Ia)) / Math.Max(1.0, otherMean));
+            return Math.Max(0.02, 0.04 + 0.82 * drop);
+        }
+
+        private bool IsAPhaseLikelyOpen(SignalSnapshot sample)
+        {
+            double otherSum = Math.Abs(sample.Ib) + Math.Abs(sample.Ic);
+            int count = 2;
+            if (Topology == MotorTopology.FivePhase)
+            {
+                otherSum += Math.Abs(sample.Id) + Math.Abs(sample.Ie);
+                count = 4;
+            }
+
+            double otherMean = otherSum / count;
+            return otherMean > 2.0 && Math.Abs(sample.Ia) < otherMean * 0.22;
+        }
+
         private SignalSnapshot GenerateSignals(double t)
         {
             int phaseCount = Topology == MotorTopology.ThreePhase ? 3 : 5;
