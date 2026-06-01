@@ -127,7 +127,7 @@ namespace FivePhaseMotorTwin
             control.Controls.Add(hint);
             left.Controls.Add(control);
 
-            GroupBox source = CreateGroup("实时数据源", 270, 142);
+            GroupBox source = CreateGroup("实时数据源", 270, 184);
             source.Controls.Add(CreateCaption("串口", 14, 28));
             _serialPortCombo = new ComboBox();
             _serialPortCombo.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -158,7 +158,20 @@ namespace FivePhaseMotorTwin
             sourceButtons.Controls.Add(_connectSerialButton, 1, 0);
             source.Controls.Add(sourceButtons);
 
-            _serialStatusValue = CreateSmallLabel("仿真数据模式", 14, 102, 240, 28);
+            _replayCsvButton = CreateButton("回放CSV", OnReplayCsvClicked);
+            _stopReplayButton = CreateButton("停止回放", OnStopReplayClicked);
+            TableLayoutPanel replayButtons = new TableLayoutPanel();
+            replayButtons.ColumnCount = 2;
+            replayButtons.RowCount = 1;
+            replayButtons.Location = new Point(14, 98);
+            replayButtons.Size = new Size(240, 36);
+            replayButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            replayButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            replayButtons.Controls.Add(_replayCsvButton, 0, 0);
+            replayButtons.Controls.Add(_stopReplayButton, 1, 0);
+            source.Controls.Add(replayButtons);
+
+            _serialStatusValue = CreateSmallLabel("仿真数据模式", 14, 142, 240, 30);
             source.Controls.Add(_serialStatusValue);
             left.Controls.Add(source);
 

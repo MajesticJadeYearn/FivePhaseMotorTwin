@@ -16,8 +16,10 @@ namespace FivePhaseMotorTwin
         private readonly List<SimulationFrame> _history = new List<SimulationFrame>();
         private readonly object _serialLock = new object();
         private readonly Queue<SignalSnapshot> _serialSamples = new Queue<SignalSnapshot>();
+        private readonly Queue<SignalSnapshot> _replaySamples = new Queue<SignalSnapshot>();
         private readonly StringBuilder _serialBuffer = new StringBuilder();
         private SerialPort _serialPort;
+        private bool _replayActive;
 
         private ComboBox _topologyCombo;
         private ComboBox _faultCombo;
@@ -26,6 +28,8 @@ namespace FivePhaseMotorTwin
         private CheckBox _autoToleranceCheck;
         private Button _refreshPortsButton;
         private Button _connectSerialButton;
+        private Button _replayCsvButton;
+        private Button _stopReplayButton;
         private Label _serialStatusValue;
         private Button _startButton;
         private Button _pauseButton;
@@ -273,6 +277,7 @@ namespace FivePhaseMotorTwin
 
             try
             {
+                StopReplay(false);
                 ResetSimulation(false);
                 ClearSerialQueue();
                 int baud = 115200;
@@ -295,6 +300,36 @@ namespace FivePhaseMotorTwin
             }
         }
 
+        private void OnReplayCsvClicked(object sender, EventArgs e)
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = "选择CSV回放数据";
+                dialog.Filter = "CSV or text data (*.csv;*.txt)|*.csv;*.txt|All files (*.*)|*.*";
+                dialog.CheckFileExists = true;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                int loaded = LoadReplayFile(dialog.FileName);
+                if (loaded <= 0)
+                {
+                    Log("CSV 回放文件没有解析到有效数据。");
+                    return;
+                }
+
+                CloseSerialPort();
+                ResetSimulation(false);
+                _replayActive = true;
+                _timer.Start();
+                SetSerialStatus("CSV回放 " + Path.GetFileName(dialog.FileName) + "，剩余 " + _replaySamples.Count.ToString());
+                Log("CSV 回放启动：" + dialog.FileName + "，有效样本 " + loaded.ToString() + " 行。");
+            }
+        }
+
+        private void OnStopReplayClicked(object sender, EventArgs e)
+        {
+            StopReplay(true);
+        }
+
         private void OnMainFormClosing(object sender, FormClosingEventArgs e)
         {
             CloseSerialPort();
@@ -305,6 +340,12 @@ namespace FivePhaseMotorTwin
             if (IsSerialConnected())
             {
                 ProcessSerialSamples();
+                return;
+            }
+
+            if (_replayActive)
+            {
+                ProcessReplaySample();
                 return;
             }
 
@@ -332,6 +373,55 @@ namespace FivePhaseMotorTwin
             if (processed > 0)
             {
                 SetSerialStatus("接收中 " + _serialPort.PortName + "，缓存 " + GetSerialQueueCount().ToString());
+            }
+        }
+
+        private void ProcessReplaySample()
+        {
+            if (_replaySamples.Count == 0)
+            {
+                StopReplay(true);
+                Log("CSV 回放结束。");
+                return;
+            }
+
+            SignalSnapshot sample = _replaySamples.Dequeue();
+            SimulationFrame frame = _engine.StepExternal(sample, _timer.Interval / 1000.0);
+            frame.SourceText = "CSV回放";
+            RecordFrame(frame);
+            AppendWaveforms(frame);
+            UpdateStatus(frame);
+            for (int i = 0; i < frame.Events.Count; i++) Log(frame.Events[i]);
+            SetSerialStatus("CSV回放中，剩余 " + _replaySamples.Count.ToString());
+        }
+
+        private int LoadReplayFile(string path)
+        {
+            _replaySamples.Clear();
+            string[] lines = File.ReadAllLines(path);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                SignalSnapshot sample;
+                if (SerialTelemetryParser.TryParse(lines[i], out sample))
+                {
+                    _replaySamples.Enqueue(sample);
+                }
+            }
+            return _replaySamples.Count;
+        }
+
+        private void StopReplay(bool log)
+        {
+            bool wasActive = _replayActive;
+            _replayActive = false;
+            _replaySamples.Clear();
+            if (!IsSerialConnected())
+            {
+                SetSerialStatus("仿真数据模式");
+            }
+            if (wasActive && log)
+            {
+                Log("CSV 回放已停止。");
             }
         }
 
@@ -411,6 +501,7 @@ namespace FivePhaseMotorTwin
 
         private void ResetSimulation(bool log)
         {
+            if (_replayActive) StopReplay(false);
             _timer.Stop();
             _pauseButton.Text = "暂停运行";
             _engine.Reset();
