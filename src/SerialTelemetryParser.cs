@@ -26,6 +26,7 @@ namespace FivePhaseMotorTwin
                 keyed.Ic = Get(values, "ic", 0.0);
                 keyed.Id = Get(values, "id", 0.0);
                 keyed.Ie = Get(values, "ie", 0.0);
+                keyed.Ix = Get(values, "ix", Get(values, "if", 0.0));
                 keyed.IaRef = Get(values, "ia_ref", Get(values, "iaref", 0.0));
                 keyed.Speed = Get(values, "speed", Get(values, "rpm", 0.0));
                 keyed.Torque = Get(values, "torque", 0.0);
@@ -86,15 +87,34 @@ namespace FivePhaseMotorTwin
                 csv.Residual = numeric[8];
                 csv.FaultFlag = numeric[9];
             }
-            else
+            else if (numeric.Count == 11)
             {
-                csv.Time = numeric[0];
-                ApplyCurrents(csv, numeric, 1, 5);
+                ApplyCurrents(csv, numeric, 0, 6);
                 csv.Speed = numeric[6];
                 csv.Torque = numeric[7];
                 csv.Iq = numeric[8];
                 csv.Residual = numeric[9];
                 csv.FaultFlag = numeric[10];
+            }
+            else if (numeric.Count == 12)
+            {
+                csv.Time = numeric[0];
+                ApplyCurrents(csv, numeric, 1, 6);
+                csv.Speed = numeric[7];
+                csv.Torque = numeric[8];
+                csv.Iq = numeric[9];
+                csv.Residual = numeric[10];
+                csv.FaultFlag = numeric[11];
+            }
+            else
+            {
+                csv.Time = numeric[0];
+                ApplyCurrents(csv, numeric, 1, 6);
+                csv.Speed = numeric[7];
+                csv.Torque = numeric[8];
+                csv.Iq = numeric[9];
+                csv.Residual = numeric[10];
+                csv.FaultFlag = numeric[11];
             }
 
             sample = csv;
@@ -110,6 +130,10 @@ namespace FivePhaseMotorTwin
             {
                 sample.Id = GetAt(values, offset + 3, 0.0);
                 sample.Ie = GetAt(values, offset + 4, 0.0);
+            }
+            if (count >= 6)
+            {
+                sample.Ix = GetAt(values, offset + 5, 0.0);
             }
         }
 

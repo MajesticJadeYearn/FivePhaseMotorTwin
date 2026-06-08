@@ -23,6 +23,7 @@ namespace FivePhaseMotorTwin
 
         private ComboBox _topologyCombo;
         private ComboBox _faultCombo;
+        private ComboBox _loadCombo;
         private ComboBox _serialPortCombo;
         private ComboBox _baudCombo;
         private CheckBox _autoToleranceCheck;
@@ -74,8 +75,18 @@ namespace FivePhaseMotorTwin
         {
             if (!_timer.Enabled)
             {
+                if (!IsSerialConnected() && !_replayActive)
+                {
+                    _engine.Reset();
+                    _history.Clear();
+                    ClearWaveforms();
+                    SimulationFrame frame = _engine.Step(0.0);
+                    RecordFrame(frame);
+                    AppendWaveforms(frame);
+                    UpdateStatus(frame);
+                }
                 _timer.Start();
-                Log("系统开始运行：" + _engine.Scenario.DisplayName + "。");
+                Log("系统开始运行：" + GetTopologyText() + "，" + GetLoadText(GetSelectedLoad()) + "，健康运行。");
             }
         }
 
@@ -143,7 +154,7 @@ namespace FivePhaseMotorTwin
             _history.Clear();
             ClearWaveforms();
             _timer.Start();
-            Log("自动运行启动：" + GetTopologyText() + "，" + _engine.Scenario.FaultText + "，正常运行 3 s -> 故障注入 2 s -> 容错控制投入 -> 稳定运行。");
+            Log("自动运行启动：" + GetTopologyText() + "，" + GetLoadText(GetSelectedLoad()) + "，" + _engine.Scenario.FaultText + "，正常运行 3 s -> 故障注入 -> 诊断后容错投入 -> 稳定运行。");
         }
 
         private void OnScreenshotClicked(object sender, EventArgs e)
@@ -183,7 +194,7 @@ namespace FivePhaseMotorTwin
                 string path = Path.Combine(folder, "waveform_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
                 using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(true)))
                 {
-                    writer.WriteLine("time_s,source,topology,ia_A,ib_A,ic_A,id_A,ie_A,speed_rpm,torque_Nm,iq_A,residual,fault_flag,running_state,fault_type,diagnosis,control_strategy");
+                    writer.WriteLine("time_s,source,topology,load,ia_A,ib_A,ic_A,id_A,ie_A,ix_A,speed_rpm,torque_Nm,iq_A,residual,fault_flag,running_state,fault_type,diagnosis,control_strategy");
                     for (int i = 0; i < _history.Count; i++)
                     {
                         SimulationFrame frame = _history[i];
@@ -194,6 +205,8 @@ namespace FivePhaseMotorTwin
                         writer.Write(",");
                         writer.Write(Csv(frame.TopologyText));
                         writer.Write(",");
+                        writer.Write(Csv(frame.LoadText));
+                        writer.Write(",");
                         writer.Write(s.Ia.ToString("0.0000"));
                         writer.Write(",");
                         writer.Write(s.Ib.ToString("0.0000"));
@@ -203,6 +216,8 @@ namespace FivePhaseMotorTwin
                         writer.Write(s.Id.ToString("0.0000"));
                         writer.Write(",");
                         writer.Write(s.Ie.ToString("0.0000"));
+                        writer.Write(",");
+                        writer.Write(s.Ix.ToString("0.0000"));
                         writer.Write(",");
                         writer.Write(s.Speed.ToString("0.0000"));
                         writer.Write(",");
@@ -246,6 +261,14 @@ namespace FivePhaseMotorTwin
             ResetSimulation(false);
             if (IsSerialConnected()) _timer.Start();
             Log("故障类型切换：" + GetFaultText(GetSelectedFault()) + "。");
+        }
+
+        private void OnLoadChanged(object sender, EventArgs e)
+        {
+            _engine.SetLoad(GetSelectedLoad());
+            ResetSimulation(false);
+            if (IsSerialConnected()) _timer.Start();
+            Log("负载工况切换：" + GetLoadText(GetSelectedLoad()) + "。");
         }
 
         private void OnAutoToleranceChanged(object sender, EventArgs e)
@@ -527,6 +550,7 @@ namespace FivePhaseMotorTwin
             currents["ic"] = s.Ic;
             currents["id"] = s.Id;
             currents["ie"] = s.Ie;
+            currents["ix"] = s.Ix;
             _currentView.Append(s.Time, currents);
 
             Dictionary<string, double> mech = new Dictionary<string, double>();
@@ -573,12 +597,29 @@ namespace FivePhaseMotorTwin
             if (_currentView == null) return;
             if (_engine.Topology == MotorTopology.ThreePhase)
             {
-                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic" }, "三相电流波形 ia / ib / ic");
+                SetCurrentLabels("ia", "ib", "ic", "id", "ie", "ix");
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic" }, "三相永磁同步电机电流 ia / ib / ic");
+            }
+            else if (_engine.Topology == MotorTopology.DualWinding)
+            {
+                SetCurrentLabels("A1", "B1", "C1", "A2", "B2", "C2");
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie", "ix" }, "双绕组电机电流 A1 / B1 / C1 / A2 / B2 / C2");
             }
             else
             {
+                SetCurrentLabels("ia", "ib", "ic", "id", "ie", "ix");
                 _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie" }, "五相电流波形 ia / ib / ic / id / ie");
             }
+        }
+
+        private void SetCurrentLabels(string ia, string ib, string ic, string id, string ie, string ix)
+        {
+            _currentView.SetSeriesLabel("ia", ia);
+            _currentView.SetSeriesLabel("ib", ib);
+            _currentView.SetSeriesLabel("ic", ic);
+            _currentView.SetSeriesLabel("id", id);
+            _currentView.SetSeriesLabel("ie", ie);
+            _currentView.SetSeriesLabel("ix", ix);
         }
 
         private void Log(string message)
@@ -652,7 +693,18 @@ namespace FivePhaseMotorTwin
 
         private MotorTopology GetSelectedTopology()
         {
-            return _topologyCombo != null && _topologyCombo.SelectedIndex == 1 ? MotorTopology.ThreePhase : MotorTopology.FivePhase;
+            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 1) return MotorTopology.ThreePhase;
+            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 2) return MotorTopology.DualWinding;
+            return MotorTopology.FivePhase;
+        }
+
+        private LoadProfile GetSelectedLoad()
+        {
+            if (_loadCombo == null) return LoadProfile.NoLoad;
+            if (_loadCombo.SelectedIndex == 1) return LoadProfile.Light;
+            if (_loadCombo.SelectedIndex == 2) return LoadProfile.Medium;
+            if (_loadCombo.SelectedIndex == 3) return LoadProfile.Rated;
+            return LoadProfile.NoLoad;
         }
 
         private bool IsAutoToleranceEnabled()
@@ -670,7 +722,17 @@ namespace FivePhaseMotorTwin
 
         private string GetTopologyText()
         {
-            return _engine.Topology == MotorTopology.ThreePhase ? "三相小电机" : "五相容错电机";
+            if (_engine.Topology == MotorTopology.ThreePhase) return "三相永磁同步电机";
+            if (_engine.Topology == MotorTopology.DualWinding) return "双绕组永磁同步电机";
+            return "五相容错电机";
+        }
+
+        private static string GetLoadText(LoadProfile load)
+        {
+            if (load == LoadProfile.Light) return "轻载";
+            if (load == LoadProfile.Medium) return "半载";
+            if (load == LoadProfile.Rated) return "额定负载";
+            return "空载";
         }
 
         private static string GetFaultText(FaultKind kind)

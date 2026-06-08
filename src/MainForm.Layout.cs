@@ -66,13 +66,14 @@ namespace FivePhaseMotorTwin
             left.BackColor = AppTheme.AppBack;
             left.Padding = new Padding(0, 0, 8, 0);
 
-            GroupBox control = CreateGroup("运行模式控制", 270, 350);
+            GroupBox control = CreateGroup("运行模式控制", 270, 388);
             control.Controls.Add(CreateCaption("电机对象", 14, 27));
             _topologyCombo = new ComboBox();
             _topologyCombo.DropDownStyle = ComboBoxStyle.DropDownList;
             _topologyCombo.Font = AppTheme.Font(9.0f, FontStyle.Regular);
             _topologyCombo.Items.Add("五相容错电机");
-            _topologyCombo.Items.Add("三相小电机");
+            _topologyCombo.Items.Add("三相永磁同步电机");
+            _topologyCombo.Items.Add("双绕组永磁同步电机");
             _topologyCombo.SelectedIndex = 0;
             _topologyCombo.SelectedIndexChanged += OnTopologyChanged;
             control.Controls.Add(Place(_topologyCombo, 86, 24, 168, 28));
@@ -88,10 +89,22 @@ namespace FivePhaseMotorTwin
             _faultCombo.SelectedIndexChanged += OnFaultTypeChanged;
             control.Controls.Add(Place(_faultCombo, 86, 59, 168, 28));
 
+            control.Controls.Add(CreateCaption("负载工况", 14, 97));
+            _loadCombo = new ComboBox();
+            _loadCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            _loadCombo.Font = AppTheme.Font(9.0f, FontStyle.Regular);
+            _loadCombo.Items.Add("空载");
+            _loadCombo.Items.Add("轻载");
+            _loadCombo.Items.Add("半载");
+            _loadCombo.Items.Add("额定负载");
+            _loadCombo.SelectedIndex = 0;
+            _loadCombo.SelectedIndexChanged += OnLoadChanged;
+            control.Controls.Add(Place(_loadCombo, 86, 94, 168, 28));
+
             _autoToleranceCheck = new CheckBox();
             _autoToleranceCheck.Text = "诊断后自动投入容错";
             _autoToleranceCheck.Checked = true;
-            _autoToleranceCheck.Location = new Point(14, 92);
+            _autoToleranceCheck.Location = new Point(14, 128);
             _autoToleranceCheck.Size = new Size(220, 22);
             _autoToleranceCheck.Font = AppTheme.Font(8.8f, FontStyle.Regular);
             _autoToleranceCheck.ForeColor = AppTheme.Text;
@@ -101,7 +114,7 @@ namespace FivePhaseMotorTwin
             TableLayoutPanel buttons = new TableLayoutPanel();
             buttons.ColumnCount = 2;
             buttons.RowCount = 4;
-            buttons.Location = new Point(14, 120);
+            buttons.Location = new Point(14, 156);
             buttons.Size = new Size(240, 158);
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -123,7 +136,7 @@ namespace FivePhaseMotorTwin
             buttons.Controls.Add(_exportButton, 0, 3);
             buttons.Controls.Add(_screenshotButton, 1, 3);
             control.Controls.Add(buttons);
-            Label hint = CreateSmallLabel("现场断开 A 相时保持自动容错开启；需要分步讲解时可关闭后手动投入。", 14, 288, 240, 44);
+            Label hint = CreateSmallLabel("开始运行只显示健康波形；断开 A 相或点击注入故障后才进入诊断与容错。", 14, 326, 240, 44);
             control.Controls.Add(hint);
             left.Controls.Add(control);
 
@@ -217,14 +230,15 @@ namespace FivePhaseMotorTwin
                 new WaveSeries("ib", "ib", "A", Color.FromArgb(32, 92, 170), -18, 18),
                 new WaveSeries("ic", "ic", "A", Color.FromArgb(36, 130, 82), -18, 18),
                 new WaveSeries("id", "id", "A", Color.FromArgb(214, 135, 32), -18, 18),
-                new WaveSeries("ie", "ie", "A", Color.FromArgb(96, 82, 145), -18, 18)
+                new WaveSeries("ie", "ie", "A", Color.FromArgb(96, 82, 145), -18, 18),
+                new WaveSeries("ix", "ix", "A", Color.FromArgb(70, 132, 150), -18, 18)
             });
 
             _mechanicalView = new WaveformView("转速 Speed / 转矩 Torque / q 轴电流 iq", new WaveSeries[]
             {
                 new WaveSeries("speed", "Speed", "rpm", Color.FromArgb(32, 92, 170), 1380, 1580),
-                new WaveSeries("torque", "Torque", "Nm", Color.FromArgb(190, 44, 38), 24, 44),
-                new WaveSeries("iq", "iq", "A", Color.FromArgb(36, 130, 82), 10, 28)
+                new WaveSeries("torque", "Torque", "Nm", Color.FromArgb(190, 44, 38), 0, 45),
+                new WaveSeries("iq", "iq", "A", Color.FromArgb(36, 130, 82), 0, 30)
             });
 
             _faultView = new WaveformView("诊断残差 residual / 故障标志 fault_flag", new WaveSeries[]

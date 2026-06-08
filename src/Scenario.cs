@@ -14,7 +14,16 @@ namespace FivePhaseMotorTwin
     public enum MotorTopology
     {
         ThreePhase = 3,
-        FivePhase = 5
+        FivePhase = 5,
+        DualWinding = 6
+    }
+
+    public enum LoadProfile
+    {
+        NoLoad,
+        Light,
+        Medium,
+        Rated
     }
 
     public enum ScenarioMode
@@ -88,6 +97,7 @@ namespace FivePhaseMotorTwin
         public double Ic;
         public double Id;
         public double Ie;
+        public double Ix;
         public double IaRef;
         public double Speed;
         public double Torque;
@@ -101,6 +111,7 @@ namespace FivePhaseMotorTwin
         public SignalSnapshot Sample;
         public string SourceText;
         public string TopologyText;
+        public string LoadText;
         public string RunningState;
         public string FaultType;
         public string DiagnosisResult;

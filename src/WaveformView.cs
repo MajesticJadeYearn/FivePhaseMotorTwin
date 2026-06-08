@@ -88,6 +88,19 @@ namespace FivePhaseMotorTwin
             Invalidate();
         }
 
+        public void SetSeriesLabel(string key, string label)
+        {
+            for (int i = 0; i < _series.Count; i++)
+            {
+                if (_series[i].Key == key)
+                {
+                    _series[i].Label = label;
+                    break;
+                }
+            }
+            Invalidate();
+        }
+
         public void ClearData()
         {
             _points.Clear();
