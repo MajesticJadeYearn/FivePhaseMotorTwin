@@ -21,23 +21,24 @@ namespace FivePhaseMotorTwin
             header.Dock = DockStyle.Fill;
             header.BackColor = Color.FromArgb(232, 235, 238);
             header.Padding = new Padding(16, 8, 16, 6);
-            Label title = new Label();
-            title.Text = "基于数字孪生的五相电机故障诊断与容错控制上位机";
-            title.Dock = DockStyle.Left;
-            title.AutoSize = false;
-            title.Width = 820;
-            title.TextAlign = ContentAlignment.MiddleLeft;
-            title.Font = AppTheme.Font(16.0f, FontStyle.Bold);
-            title.ForeColor = AppTheme.Text;
+            _titleLabel = new Label();
+            _titleLabel.Text = GetWindowTitle(_engine.Topology);
+            _titleLabel.Dock = DockStyle.Left;
+            _titleLabel.AutoSize = false;
+            _titleLabel.Width = 1030;
+            _titleLabel.AutoEllipsis = true;
+            _titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _titleLabel.Font = AppTheme.Font(14.0f, FontStyle.Bold);
+            _titleLabel.ForeColor = AppTheme.Text;
             Label subtitle = new Label();
-            subtitle.Text = "上位机程序｜故障不停机 · 动力不中断";
+            subtitle.Text = "模型观测器-ELM在线诊断｜故障不停机 · 动力不中断";
             subtitle.Dock = DockStyle.Right;
             subtitle.AutoSize = false;
-            subtitle.Width = 420;
+            subtitle.Width = 300;
             subtitle.TextAlign = ContentAlignment.MiddleRight;
-            subtitle.Font = AppTheme.Font(10.0f, FontStyle.Regular);
+            subtitle.Font = AppTheme.Font(9.0f, FontStyle.Regular);
             subtitle.ForeColor = AppTheme.MutedText;
-            header.Controls.Add(title);
+            header.Controls.Add(_titleLabel);
             header.Controls.Add(subtitle);
             root.Controls.Add(header, 0, 0);
 
@@ -71,9 +72,9 @@ namespace FivePhaseMotorTwin
             _topologyCombo = new ComboBox();
             _topologyCombo.DropDownStyle = ComboBoxStyle.DropDownList;
             _topologyCombo.Font = AppTheme.Font(9.0f, FontStyle.Regular);
-            _topologyCombo.Items.Add("五相容错电机");
             _topologyCombo.Items.Add("三相永磁同步电机");
             _topologyCombo.Items.Add("双绕组永磁同步电机");
+            _topologyCombo.Items.Add("五相永磁容错电机");
             _topologyCombo.SelectedIndex = 0;
             _topologyCombo.SelectedIndexChanged += OnTopologyChanged;
             control.Controls.Add(Place(_topologyCombo, 86, 24, 168, 28));
@@ -203,7 +204,7 @@ namespace FivePhaseMotorTwin
             metrics.Controls.Add(_recoveryTimeValue);
             left.Controls.Add(metrics);
 
-            GroupBox twin = CreateGroup("数字孪生模型状态", 270, 290);
+            GroupBox twin = CreateGroup("模型观测器-ELM诊断链", 270, 290);
             _twinPanel = new TwinFlowPanel();
             _twinPanel.Location = new Point(10, 24);
             _twinPanel.Size = new Size(248, 252);
@@ -224,7 +225,7 @@ namespace FivePhaseMotorTwin
             waves.RowStyles.Add(new RowStyle(SizeType.Percent, 29));
             waves.RowStyles.Add(new RowStyle(SizeType.Percent, 29));
 
-            _currentView = new WaveformView("五相电流波形 ia / ib / ic / id / ie", new WaveSeries[]
+            _currentView = new WaveformView("三相永磁同步电机电流 ia / ib / ic", new WaveSeries[]
             {
                 new WaveSeries("ia", "ia", "A", Color.FromArgb(190, 44, 38), -18, 18),
                 new WaveSeries("ib", "ib", "A", Color.FromArgb(32, 92, 170), -18, 18),

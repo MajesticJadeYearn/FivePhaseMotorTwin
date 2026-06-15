@@ -24,7 +24,7 @@ namespace FivePhaseMotorTwin
 
         public SimulationEngine()
         {
-            Topology = MotorTopology.FivePhase;
+            Topology = MotorTopology.ThreePhase;
             Load = LoadProfile.NoLoad;
             _scenario = ScenarioInfo.FromMode(ScenarioMode.Normal);
             Reset();
@@ -47,6 +47,11 @@ namespace FivePhaseMotorTwin
         public bool AutoToleranceEnabled
         {
             get { return _autoToleranceEnabled; }
+        }
+
+        public string CurrentStrategyText
+        {
+            get { return GetStrategyText(_scenario); }
         }
 
         public double TimeSeconds { get; private set; }
@@ -192,14 +197,14 @@ namespace FivePhaseMotorTwin
                 _scenario = ScenarioInfo.FromMode(GetModeForFault(_selectedFault, _autoToleranceEnabled));
                 BeginFault();
                 frame.Events.Add("实时数据检测到 A 相异常：" + _scenario.FaultText + "。");
-                frame.Events.Add("数字孪生残差异常：实测电流与基准电流偏差突增。");
+                frame.Events.Add("模型观测器残差异常：实测量与观测基准偏差突增。");
                 if (_autoToleranceEnabled) frame.Events.Add("诊断完成后将自动投入容错控制。");
             }
 
             if (_scenario.HasTolerance && _faultInjected && _diagnosed && !_toleranceActive && TimeSeconds >= _faultTime + ToleranceHandoffDelaySeconds)
             {
                 ActivateTolerance();
-                frame.Events.Add("诊断结果联动容错控制投入：" + _scenario.StrategyText + "。");
+                frame.Events.Add("ELM诊断结果联动容错控制投入：" + GetStrategyText(_scenario) + "。");
             }
 
             UpdateDiagnosisAndRecovery(frame);
@@ -241,12 +246,12 @@ namespace FivePhaseMotorTwin
                 {
                     BeginFault();
                     frame.Events.Add("故障注入完成：" + _scenario.FaultText + "。");
-                    frame.Events.Add("数字孪生残差异常：实测电流与基准电流偏差突增。");
+                    frame.Events.Add("模型观测器残差异常：实测量与观测基准偏差突增。");
                 }
                 if (_scenario.HasTolerance && _faultInjected && _diagnosed && !_toleranceActive && TimeSeconds >= _faultTime + ToleranceHandoffDelaySeconds)
                 {
                     ActivateTolerance();
-                    frame.Events.Add("诊断结果联动容错控制投入：" + _scenario.StrategyText + "。");
+                    frame.Events.Add("ELM诊断结果联动容错控制投入：" + GetStrategyText(_scenario) + "。");
                 }
             }
             else
@@ -254,7 +259,7 @@ namespace FivePhaseMotorTwin
                 if (_scenario.HasTolerance && _faultInjected && _diagnosed && !_toleranceActive && TimeSeconds >= _faultTime + ToleranceHandoffDelaySeconds)
                 {
                     ActivateTolerance();
-                    frame.Events.Add("诊断结果联动容错控制投入：" + _scenario.StrategyText + "。");
+                    frame.Events.Add("ELM诊断结果联动容错控制投入：" + GetStrategyText(_scenario) + "。");
                 }
             }
 
@@ -270,7 +275,7 @@ namespace FivePhaseMotorTwin
             if (_faultInjected && !_diagnosed && TimeSeconds >= _faultTime + _diagnosisTimeMs / 1000.0)
             {
                 _diagnosed = true;
-                frame.Events.Add("故障诊断完成：" + _scenario.FaultText + "，响应时间 " + _diagnosisTimeMs.ToString("0.00") + " ms。");
+                frame.Events.Add("ELM故障分类完成：" + _scenario.FaultText + "，响应时间 " + _diagnosisTimeMs.ToString("0.00") + " ms。");
             }
 
             if (_toleranceActive && !_stableAnnounced && TimeSeconds >= _toleranceTime + _recoveryTimeMs / 1000.0)
@@ -294,36 +299,36 @@ namespace FivePhaseMotorTwin
             {
                 frame.RunningState = _autoDemo ? "自动运行：" + GetTopologyText() + " " + GetLoadText() + "健康阶段" : GetTopologyText() + " " + GetLoadText() + "健康运行";
                 frame.FaultType = "无故障";
-                frame.DiagnosisResult = "数字孪生残差正常，fault_flag = 0";
+                frame.DiagnosisResult = "模型观测器残差正常，ELM输出 fault_flag = 0";
                 frame.ControlStrategy = GetHealthyStrategy();
             }
             else if (!_diagnosed)
             {
                 frame.RunningState = "故障注入，等待诊断";
                 frame.FaultType = "待识别";
-                frame.DiagnosisResult = "残差突增，诊断窗口采样中";
+                frame.DiagnosisResult = "残差特征突增，ELM滑动窗口采样中";
                 frame.ControlStrategy = "保持当前保护策略";
             }
             else if (_scenario.HasTolerance && _toleranceActive)
             {
                 frame.RunningState = _stableAnnounced ? "容错稳定运行" : "容错恢复中";
                 frame.FaultType = _scenario.FaultText;
-                frame.DiagnosisResult = "已定位 " + _scenario.FaultText + "，fault_flag = 1";
-                frame.ControlStrategy = _scenario.StrategyText;
+                frame.DiagnosisResult = "ELM已定位 " + _scenario.FaultText + "，fault_flag = 1";
+                frame.ControlStrategy = GetStrategyText(_scenario);
             }
             else
             {
                 frame.RunningState = _scenario.HasTolerance ? "已诊断，自动容错待投入" : "故障运行，未投入容错";
                 frame.FaultType = _scenario.FaultText;
-                frame.DiagnosisResult = "已定位 " + _scenario.FaultText + "，fault_flag = 1";
-                frame.ControlStrategy = _scenario.HasTolerance ? "诊断联动：" + _scenario.StrategyText : _scenario.StrategyText;
+                frame.DiagnosisResult = "ELM已定位 " + _scenario.FaultText + "，fault_flag = 1";
+                frame.ControlStrategy = _scenario.HasTolerance ? "诊断联动：" + GetStrategyText(_scenario) : GetStrategyText(_scenario);
             }
 
             SignalSnapshot s = frame.Sample;
-            frame.TwinPhysicalText = "实体电机实时电流  ia=" + s.Ia.ToString("0.00") + " A";
-            frame.TwinReferenceText = "数字孪生基准电流  ia*=" + s.IaRef.ToString("0.00") + " A";
-            frame.TwinResidualText = "残差计算  residual=" + s.Residual.ToString("0.000") + ", fault_flag=" + s.FaultFlag.ToString("0");
-            frame.TwinFaultText = "故障类型识别  " + frame.FaultType;
+            frame.TwinPhysicalText = "实时电机电流  ia=" + s.Ia.ToString("0.00") + " A";
+            frame.TwinReferenceText = "模型观测器基准  ia*=" + s.IaRef.ToString("0.00") + " A";
+            frame.TwinResidualText = "残差特征  residual=" + s.Residual.ToString("0.000") + ", ELM=" + s.FaultFlag.ToString("0");
+            frame.TwinFaultText = "ELM故障分类  " + frame.FaultType;
             frame.TwinStrategyText = "容错策略匹配  " + frame.ControlStrategy;
         }
 
@@ -515,14 +520,40 @@ namespace FivePhaseMotorTwin
         {
             if (Topology == MotorTopology.ThreePhase) return "三相永磁同步电机";
             if (Topology == MotorTopology.DualWinding) return "双绕组永磁同步电机";
-            return "五相容错电机";
+            return "五相永磁容错电机";
         }
 
         private string GetHealthyStrategy()
         {
             if (Topology == MotorTopology.ThreePhase) return "健康三相矢量控制 / 三相 SVPWM";
             if (Topology == MotorTopology.DualWinding) return "双绕组三相矢量控制 / 双绕组解耦";
-            return "健康五相矢量控制 / 五相 SVPWM";
+            return "健康五相容错矢量控制 / 五相 SVPWM";
+        }
+
+        private string GetStrategyText(ScenarioInfo scenario)
+        {
+            if (scenario == null || !scenario.HasFault) return GetHealthyStrategy();
+            if (!scenario.HasTolerance)
+            {
+                if (scenario.Fault == FaultKind.WindingOpen) return "ELM已定位绕组开路，等待容错控制投入";
+                return "ELM已定位功率管开路，等待半波畸变补偿";
+            }
+
+            if (scenario.Fault == FaultKind.WindingOpen)
+            {
+                if (Topology == MotorTopology.ThreePhase) return "两相电流重构 + q 轴转矩补偿";
+                if (Topology == MotorTopology.DualWinding) return "双绕组冗余电流分配 + q 轴转矩补偿";
+                return "四相重构电流分配 + q 轴转矩补偿";
+            }
+            if (scenario.Fault == FaultKind.UpperSwitchOpen)
+            {
+                if (Topology == MotorTopology.ThreePhase) return "上桥臂开路半波识别 + 三相电流参考补偿";
+                if (Topology == MotorTopology.DualWinding) return "双绕组上桥臂开路隔离 + 冗余绕组补偿";
+                return "五相上桥臂开路半波识别 + 剩余相电流重构";
+            }
+            if (Topology == MotorTopology.ThreePhase) return "下桥臂开路半波识别 + 三相电流参考补偿";
+            if (Topology == MotorTopology.DualWinding) return "双绕组下桥臂开路隔离 + 冗余绕组补偿";
+            return "五相下桥臂开路半波识别 + 剩余相电流重构";
         }
 
         private string GetLoadText()

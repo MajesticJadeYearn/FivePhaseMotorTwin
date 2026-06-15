@@ -8,10 +8,10 @@ namespace FivePhaseMotorTwin
     {
         private readonly string[] _titles = new string[]
         {
-            "实体电机实时电流",
-            "数字孪生基准电流",
-            "残差计算",
-            "故障类型识别",
+            "实时电机电流",
+            "模型观测器基准",
+            "残差特征提取",
+            "ELM故障分类",
             "容错策略匹配"
         };
 
@@ -21,7 +21,7 @@ namespace FivePhaseMotorTwin
             "ia*=-- A",
             "residual=--",
             "无故障",
-            "健康五相矢量控制"
+            "健康矢量控制"
         };
 
         public TwinFlowPanel()

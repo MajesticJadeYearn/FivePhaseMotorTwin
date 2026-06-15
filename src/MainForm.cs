@@ -40,6 +40,7 @@ namespace FivePhaseMotorTwin
         private Button _autoButton;
         private Button _exportButton;
         private Button _screenshotButton;
+        private Label _titleLabel;
         private Label _stateValue;
         private Label _faultValue;
         private Label _diagTimeValue;
@@ -54,7 +55,7 @@ namespace FivePhaseMotorTwin
 
         public MainForm()
         {
-            Text = "基于数字孪生的五相电机故障诊断与容错控制上位机";
+            Text = GetWindowTitle(_engine.Topology);
             BackColor = AppTheme.AppBack;
             Font = AppTheme.Font(9.0f, FontStyle.Regular);
             MinimumSize = new Size(1360, 820);
@@ -63,6 +64,7 @@ namespace FivePhaseMotorTwin
             WindowState = FormWindowState.Maximized;
 
             InitializeUi();
+            UpdateWindowTitle();
             ConfigureCurrentWaveView();
             RefreshSerialPorts();
             _timer.Interval = 20;
@@ -119,7 +121,7 @@ namespace FivePhaseMotorTwin
             if (ok)
             {
                 Log("故障注入完成：" + _engine.Scenario.FaultText + "。");
-                Log("数字孪生残差异常：实测电流与基准电流偏差突增。");
+                Log("模型观测器残差异常：实测量与观测基准偏差突增。");
                 if (_engine.AutoToleranceEnabled) Log("诊断完成后将自动投入容错控制。");
                 if (!_timer.Enabled) _timer.Start();
             }
@@ -136,7 +138,7 @@ namespace FivePhaseMotorTwin
             bool ok = _engine.ActivateToleranceNow();
             if (ok)
             {
-                Log("容错控制投入：" + _engine.Scenario.StrategyText + "。");
+                Log("容错控制投入：" + _engine.CurrentStrategyText + "。");
                 if (!_timer.Enabled) _timer.Start();
             }
             else
@@ -249,6 +251,7 @@ namespace FivePhaseMotorTwin
         private void OnTopologyChanged(object sender, EventArgs e)
         {
             _engine.SetTopology(GetSelectedTopology());
+            UpdateWindowTitle();
             ConfigureCurrentWaveView();
             ResetSimulation(false);
             if (IsSerialConnected()) _timer.Start();
@@ -603,12 +606,12 @@ namespace FivePhaseMotorTwin
             else if (_engine.Topology == MotorTopology.DualWinding)
             {
                 SetCurrentLabels("A1", "B1", "C1", "A2", "B2", "C2");
-                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie", "ix" }, "双绕组电机电流 A1 / B1 / C1 / A2 / B2 / C2");
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie", "ix" }, "双绕组永磁同步电机电流 A1 / B1 / C1 / A2 / B2 / C2");
             }
             else
             {
                 SetCurrentLabels("ia", "ib", "ic", "id", "ie", "ix");
-                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie" }, "五相电流波形 ia / ib / ic / id / ie");
+                _currentView.SetVisibleSeries(new string[] { "ia", "ib", "ic", "id", "ie" }, "五相永磁容错电机电流 ia / ib / ic / id / ie");
             }
         }
 
@@ -693,9 +696,9 @@ namespace FivePhaseMotorTwin
 
         private MotorTopology GetSelectedTopology()
         {
-            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 1) return MotorTopology.ThreePhase;
-            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 2) return MotorTopology.DualWinding;
-            return MotorTopology.FivePhase;
+            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 1) return MotorTopology.DualWinding;
+            if (_topologyCombo != null && _topologyCombo.SelectedIndex == 2) return MotorTopology.FivePhase;
+            return MotorTopology.ThreePhase;
         }
 
         private LoadProfile GetSelectedLoad()
@@ -724,7 +727,27 @@ namespace FivePhaseMotorTwin
         {
             if (_engine.Topology == MotorTopology.ThreePhase) return "三相永磁同步电机";
             if (_engine.Topology == MotorTopology.DualWinding) return "双绕组永磁同步电机";
-            return "五相容错电机";
+            return "五相永磁容错电机";
+        }
+
+        private void UpdateWindowTitle()
+        {
+            string title = GetWindowTitle(_engine.Topology);
+            Text = title;
+            if (_titleLabel != null) _titleLabel.Text = title;
+        }
+
+        private static string GetWindowTitle(MotorTopology topology)
+        {
+            if (topology == MotorTopology.DualWinding)
+            {
+                return "基于模型-数据混合驱动的双绕组永磁同步电机驱动系统故障诊断与容错控制上位机";
+            }
+            if (topology == MotorTopology.FivePhase)
+            {
+                return "基于模型-数据混合驱动的五相永磁容错电机驱动系统故障诊断与容错控制上位机";
+            }
+            return "基于模型-数据混合驱动的三相永磁同步电机驱动系统故障诊断与容错控制上位机";
         }
 
         private static string GetLoadText(LoadProfile load)
